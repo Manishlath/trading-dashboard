@@ -30,11 +30,110 @@ export type AccountSummary = {
   currency: string;
 };
 
-const BASE = '';
+export type OptionContract = {
+  symbol: string;
+  expiry: string;
+  strike: number;
+  opt_type: 'call' | 'put';
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  volume: number | null;
+  open_interest: number | null;
+  iv: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+};
+
+export type OptionChain = {
+  underlying: string;
+  underlying_price: number;
+  expiry: string;
+  days_to_expiry: number;
+  contracts: OptionContract[];
+  available_expiries: string[];
+};
+
+export type IVRank = {
+  symbol: string;
+  current_hv30: number;
+  hv_rank_52w: number;
+  hv_pct_52w: number;
+  iv_current: number | null;
+  iv_rank_52w: number | null;
+};
+
+export type TradeLeg = {
+  action: 'buy' | 'sell';
+  opt_type: 'call' | 'put';
+  strike: number;
+  expiry: string;
+  quantity: number;
+  mid_price: number;
+  delta: number | null;
+  bid: number | null;
+  ask: number | null;
+  spread_pct: number | null;
+  open_interest: number | null;
+  volume: number | null;
+};
+
+export type TradeIdea = {
+  symbol: string;
+  generated_at: string;
+  strategy: string;
+  direction: string;
+  thesis: string;
+  underlying_price: number;
+  expiry: string;
+  days_to_expiry: number;
+  legs: TradeLeg[];
+  contracts: number;
+  net_credit: number;
+  max_profit: number;
+  max_loss: number;
+  breakevens: number[];
+  prob_of_profit: number;
+  return_on_risk: number;
+  iv_rank: number;
+  hv30: number;
+  pnl_curve: [number, number][];
+  signals: string[];
+  liquidity_ok: boolean;
+  liquidity_warnings: string[];
+  est_slippage: number;
+};
+
+export type ScreenCandidate = {
+  symbol: string;
+  score: number;
+  bias: string;
+  last_price: number;
+  trend: string;
+  momentum: string;
+  rsi14: number | null;
+  pe_ratio: number | null;
+  forward_pe: number | null;
+  peg_ratio: number | null;
+  net_margin: number | null;
+  roe: number | null;
+  hv_rank: number | null;
+  signals: string[];
+};
+
+export type ScreenResult = {
+  generated_at: string;
+  universe: string[];
+  candidates: ScreenCandidate[];
+};
+
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`API ${path} -> ${res.status}`);
+  if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
   return res.json();
 }
 
@@ -43,9 +142,12 @@ export const api = {
   account: () => get<AccountSummary>('/api/account'),
   quote: (symbol: string) => get<Record<string, unknown>>(`/api/quote/${symbol}`),
   chain: (symbol: string, expiry?: string) =>
-    get<Record<string, unknown>>(
-      `/api/chain/${symbol}${expiry ? `?expiry=${expiry}` : ''}`,
-    ),
+    get<OptionChain>(`/api/chain/${symbol}${expiry ? `?expiry=${expiry}` : ''}`),
+  ivRank: (symbol: string) => get<IVRank>(`/api/ivrank/${symbol}`),
+  tradeIdea: (symbol: string, expiry?: string) =>
+    get<TradeIdea>(`/api/trade-idea/${symbol}${expiry ? `?expiry=${expiry}` : ''}`),
+  screen: (symbols?: string[]) =>
+    get<ScreenResult>(`/api/screen${symbols?.length ? `?symbols=${symbols.join(',')}` : ''}`),
   fundamentals: (symbol: string) =>
     get<Record<string, unknown>>(`/api/fundamentals/${symbol}`),
 };

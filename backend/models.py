@@ -62,6 +62,107 @@ class OptionChain(BaseModel):
     expiry: str
     days_to_expiry: int
     contracts: list[OptionContract]
+    available_expiries: list[str] = []  # YYYY-MM-DD list for the dropdown
+
+
+class IVRank(BaseModel):
+    """IV rank and percentile for a symbol over the trailing year."""
+    symbol: str
+    current_hv30: float        # 30-day realised vol, annualised (fraction)
+    hv_rank_52w: float         # where current HV sits in 52w min–max (0–100)
+    hv_pct_52w: float          # fraction of 52w days below current HV (0–100)
+    iv_current: Optional[float] = None   # current implied vol from IB if available
+    iv_rank_52w: Optional[float] = None  # IV rank if IB provides historical IV
+
+
+class Technicals(BaseModel):
+    """Computed technical indicators for a symbol from OHLCV history."""
+    symbol: str
+    as_of: datetime
+    last_price: float
+    sma20: Optional[float] = None
+    sma50: Optional[float] = None
+    sma200: Optional[float] = None
+    rsi14: Optional[float] = None
+    macd: Optional[float] = None
+    macd_signal: Optional[float] = None
+    macd_hist: Optional[float] = None
+    bb_upper: Optional[float] = None
+    bb_mid: Optional[float] = None
+    bb_lower: Optional[float] = None
+    atr14: Optional[float] = None
+    support: Optional[float] = None
+    resistance: Optional[float] = None
+    trend: str = "sideways"        # "uptrend" | "downtrend" | "sideways"
+    momentum: str = "neutral"      # "overbought" | "oversold" | "neutral"
+
+
+class ScreenCandidate(BaseModel):
+    """One ranked symbol from the fundamentals + technicals screen."""
+    symbol: str
+    score: float                   # signed composite (positive = bullish)
+    bias: str                      # "bullish" | "bearish" | "neutral"
+    last_price: float
+    trend: str
+    momentum: str
+    rsi14: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    forward_pe: Optional[float] = None
+    peg_ratio: Optional[float] = None
+    net_margin: Optional[float] = None
+    roe: Optional[float] = None
+    hv_rank: Optional[float] = None
+    signals: list[str] = []
+
+
+class ScreenResult(BaseModel):
+    """Ranked screen output across a universe."""
+    generated_at: datetime
+    universe: list[str]
+    candidates: list[ScreenCandidate]   # ranked by |score| desc
+
+
+class TradeLeg(BaseModel):
+    """One leg of a generated trade idea."""
+    action: Literal["buy", "sell"]
+    opt_type: Literal["call", "put"]
+    strike: float
+    expiry: str                    # YYYY-MM-DD
+    quantity: int
+    mid_price: float               # per share
+    delta: Optional[float] = None
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+    spread_pct: Optional[float] = None   # (ask-bid)/mid, None if no live market
+    open_interest: Optional[int] = None
+    volume: Optional[int] = None
+
+
+class TradeIdea(BaseModel):
+    """A concrete, profit-seeking option trade produced by the strategy engine."""
+    symbol: str
+    generated_at: datetime
+    strategy: str                  # e.g. "Bull put credit spread"
+    direction: str                 # "bullish" | "neutral-bullish" | ...
+    thesis: str
+    underlying_price: float
+    expiry: str
+    days_to_expiry: int
+    legs: list[TradeLeg]
+    contracts: int                 # number of spreads suggested
+    net_credit: float              # dollars per spread (positive = credit received)
+    max_profit: float              # dollars per spread
+    max_loss: float                # dollars per spread (positive number)
+    breakevens: list[float]
+    prob_of_profit: float          # 0–100
+    return_on_risk: float          # fraction (max_profit / max_loss)
+    iv_rank: float                 # HV rank 0–100
+    hv30: float                    # annualised 30-day realised vol (fraction)
+    pnl_curve: list[tuple[float, float]]  # (underlying price, P&L per spread)
+    signals: list[str] = []        # valuation + technical rationale bullets
+    liquidity_ok: bool = True      # both legs pass the liquidity gate
+    liquidity_warnings: list[str] = []   # bid/offer-leakage flags
+    est_slippage: float = 0.0      # $ to cross the spreads on entry (per position)
 
 
 class Fundamentals(BaseModel):
