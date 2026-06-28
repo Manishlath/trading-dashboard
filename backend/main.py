@@ -30,6 +30,7 @@ from models import (
     Technicals,
     TradeIdea,
 )
+import momentum as momentum_engine
 from screener import DEFAULT_UNIVERSE, screen_universe
 from strategy_engine import TradeIdeaError
 from options_math import Leg, breakeven_points, greeks, strategy_pnl_at_expiry
@@ -142,6 +143,37 @@ async def screen(symbols: str | None = None) -> ScreenResult:
         [s.strip() for s in symbols.split(",") if s.strip()] if symbols else DEFAULT_UNIVERSE
     )
     return await screen_universe(ibkr, stockanalysis, universe)
+
+
+@app.get("/api/momentum/universe")
+async def momentum_universe() -> dict:
+    """Default editable universe for the momentum desk."""
+    return {"universe": momentum_engine.DEFAULT_UNIVERSE}
+
+
+@app.get("/api/momentum/rank")
+async def momentum_rank(symbols: str | None = None) -> dict:
+    """Current residual (market-adjusted) momentum ranking for the universe."""
+    universe = (
+        [s.strip() for s in symbols.split(",") if s.strip()]
+        if symbols else momentum_engine.DEFAULT_UNIVERSE
+    )
+    return {"generated_at": datetime.utcnow().isoformat(),
+            "ranking": momentum_engine.rank_universe(universe)}
+
+
+@app.get("/api/momentum/backtest")
+async def momentum_backtest(
+    symbols: str | None = None,
+    start: str = "2023-01-01",
+    end: str = "2026-06-27",
+) -> dict:
+    """Backtest the residual-momentum strategy over an (editable) universe vs SPY."""
+    universe = (
+        [s.strip() for s in symbols.split(",") if s.strip()]
+        if symbols else momentum_engine.DEFAULT_UNIVERSE
+    )
+    return momentum_engine.backtest(universe, start, end)
 
 
 @app.get("/api/technicals/{symbol}", response_model=Technicals)
