@@ -40,7 +40,7 @@ DEFAULT_UNIVERSE = sorted(set([
 
 # Per-symbol price cache: symbol -> (fetched_on, Series of adjusted close).
 _CACHE: dict[str, tuple[date, pd.Series]] = {}
-_LOOKBACK_YEARS = 6
+_LOOKBACK_YEARS = 9
 
 
 def _fetch_yahoo(symbol: str) -> pd.Series | None:
