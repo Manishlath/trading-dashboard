@@ -129,6 +129,30 @@ export type ScreenResult = {
   candidates: ScreenCandidate[];
 };
 
+export type MomentumName = {
+  ticker: string;
+  rank: number;
+  trend: number;
+  mkt_adj: number;
+  score: number;
+  selected: boolean;
+};
+
+export type MomentumBacktest = {
+  start: string;
+  end: string;
+  rebalances: number;
+  total_return: number;
+  cagr: number;
+  max_drawdown: number;
+  spy_total: number;
+  excess_vs_spy: number;
+  curve: { date: string; strategy: number; spy: number }[];
+  yearly: { year: number; strategy: number }[];
+  current_holdings: string[];
+  error?: string;
+};
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 async function get<T>(path: string): Promise<T> {
@@ -148,6 +172,13 @@ export const api = {
     get<TradeIdea>(`/api/trade-idea/${symbol}${expiry ? `?expiry=${expiry}` : ''}`),
   screen: (symbols?: string[]) =>
     get<ScreenResult>(`/api/screen${symbols?.length ? `?symbols=${symbols.join(',')}` : ''}`),
+  momentumUniverse: () => get<{ universe: string[] }>('/api/momentum/universe'),
+  momentumRank: (symbols: string[]) =>
+    get<{ generated_at: string; ranking: MomentumName[] }>(
+      `/api/momentum/rank?symbols=${symbols.join(',')}`),
+  momentumBacktest: (symbols: string[], start: string, end: string) =>
+    get<MomentumBacktest>(
+      `/api/momentum/backtest?symbols=${symbols.join(',')}&start=${start}&end=${end}`),
   fundamentals: (symbol: string) =>
     get<Record<string, unknown>>(`/api/fundamentals/${symbol}`),
 };

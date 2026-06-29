@@ -5,6 +5,7 @@ import { PortfolioMonitor } from '@/components/PortfolioMonitor';
 import { OptionsDesk } from '@/components/OptionsDesk';
 import { TradeIdea } from '@/components/TradeIdea';
 import { Screener } from '@/components/Screener';
+import { MomentumDesk } from '@/components/MomentumDesk';
 
 export default function DashboardPage() {
   const [now, setNow] = useState<string>('');
@@ -21,6 +22,10 @@ export default function DashboardPage() {
           Connected to IBKR · {now}
         </span>
       </header>
+
+      <div className="mb-6">
+        <MomentumDesk />
+      </div>
 
       <div className="mb-6">
         <Screener onPick={setPickedSymbol} />
