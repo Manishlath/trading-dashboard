@@ -23,7 +23,7 @@ function Stat({ label, value, good }: { label: string; value: string; good?: boo
 
 export function MomentumDesk() {
   const [universeText, setUniverseText] = useState('');
-  const [start, setStart] = useState('2023-01-01');
+  const [start, setStart] = useState('2020-01-01');
   const [end, setEnd] = useState('2026-06-27');
   const [ranking, setRanking] = useState<MomentumName[]>([]);
   const [bt, setBt] = useState<MomentumBacktest | null>(null);

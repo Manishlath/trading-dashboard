@@ -66,7 +66,10 @@ app = FastAPI(title="Trading Dashboard API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
+    # localhost for desktop dev; private-LAN regex so phones/tablets on the same
+    # WiFi (e.g. http://192.168.x.x:3000) can reach the API too.
     allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+):3000",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -165,7 +168,7 @@ async def momentum_rank(symbols: str | None = None) -> dict:
 @app.get("/api/momentum/backtest")
 async def momentum_backtest(
     symbols: str | None = None,
-    start: str = "2023-01-01",
+    start: str = "2020-01-01",
     end: str = "2026-06-27",
 ) -> dict:
     """Backtest the residual-momentum strategy over an (editable) universe vs SPY."""
