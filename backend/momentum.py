@@ -23,6 +23,25 @@ logger = logging.getLogger(__name__)
 
 BENCH, SAFE = "SPY", "GLD"
 N_HOLD, BUFFER = 10, 20
+
+# NIFTY 50 constituents (Yahoo NSE tickers). Benchmark = NIFTY 50 index,
+# safe asset = Nippon Gold BeES ETF.
+NIFTY_UNIVERSE = sorted(set([
+    "ADANIENT.NS","ADANIPORTS.NS","APOLLOHOSP.NS","ASIANPAINT.NS","AXISBANK.NS","BAJAJ-AUTO.NS",
+    "BAJFINANCE.NS","BAJAJFINSV.NS","BEL.NS","BHARTIARTL.NS","CIPLA.NS","COALINDIA.NS",
+    "DRREDDY.NS","EICHERMOT.NS","GRASIM.NS","HCLTECH.NS","HDFCBANK.NS","HDFCLIFE.NS",
+    "HEROMOTOCO.NS","HINDALCO.NS","HINDUNILVR.NS","ICICIBANK.NS","INDUSINDBK.NS","INFY.NS",
+    "ITC.NS","JSWSTEEL.NS","KOTAKBANK.NS","LT.NS","M&M.NS","MARUTI.NS","NESTLEIND.NS","NTPC.NS",
+    "ONGC.NS","POWERGRID.NS","RELIANCE.NS","SBILIFE.NS","SBIN.NS","SHRIRAMFIN.NS","SUNPHARMA.NS",
+    "TATACONSUM.NS","TATAMOTORS.NS","TATASTEEL.NS","TCS.NS","TECHM.NS","TITAN.NS","TRENT.NS",
+    "ULTRACEMCO.NS","WIPRO.NS",
+]))
+
+# Market configs: universe + benchmark + defensive asset per market.
+MARKETS: dict[str, dict] = {
+    "us": {"universe": None, "bench": "SPY", "safe": "GLD"},          # universe set below
+    "india": {"universe": NIFTY_UNIVERSE, "bench": "^NSEI", "safe": "GOLDBEES.NS"},
+}
 _H = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
 
 # Default broad large/mid-cap universe (editable from the UI).
@@ -38,6 +57,8 @@ DEFAULT_UNIVERSE = sorted(set([
     "TMUS","TXN","UNH","UNP","UPS","USB","V","VLO","VRTX","VZ","WDC","WFC","WMT","XOM",
 ]))
 
+MARKETS["us"]["universe"] = DEFAULT_UNIVERSE
+
 # Per-symbol price cache: symbol -> (fetched_on, Series of adjusted close).
 _CACHE: dict[str, tuple[date, pd.Series]] = {}
 _LOOKBACK_YEARS = 9
@@ -47,8 +68,9 @@ def _fetch_yahoo(symbol: str) -> pd.Series | None:
     end = datetime.utcnow()
     start = end - timedelta(days=365 * _LOOKBACK_YEARS)
     try:
+        from urllib.parse import quote
         r = httpx.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(symbol, safe='')}",
             params={"period1": int(start.timestamp()), "period2": int(end.timestamp()),
                     "interval": "1d"}, headers=_H, timeout=25,
         )
@@ -61,10 +83,10 @@ def _fetch_yahoo(symbol: str) -> pd.Series | None:
         return None
 
 
-def get_prices(symbols: list[str]) -> pd.DataFrame:
-    """Cached price panel (adjusted close), artifact-cleaned. Always includes SPY+GLD."""
+def get_prices(symbols: list[str], bench: str = BENCH, safe: str = SAFE) -> pd.DataFrame:
+    """Cached price panel (adjusted close), artifact-cleaned. Includes bench + safe assets."""
     today = datetime.utcnow().date()
-    want = list(dict.fromkeys([s.upper() for s in symbols] + [BENCH, SAFE]))
+    want = list(dict.fromkeys([s.upper() for s in symbols] + [bench, safe]))
     series: dict[str, pd.Series] = {}
     for s in want:
         hit = _CACHE.get(s)
@@ -107,11 +129,13 @@ def _score_panels(px: pd.DataFrame, bench: pd.Series):
     return trend, mkt_adj, trend + mkt_adj
 
 
-def rank_universe(symbols: list[str]) -> list[dict]:
+def rank_universe(symbols: list[str], market: str = "us") -> list[dict]:
     """Current residual-momentum ranking: trend, mkt_adj, score per name (desc)."""
-    px = get_prices(symbols)
-    bench = px[BENCH]
-    stocks = [c for c in px.columns if c not in (BENCH, SAFE)]
+    cfg = MARKETS.get(market, MARKETS["us"])
+    b, sf = cfg["bench"], cfg["safe"]
+    px = get_prices(symbols, b, sf)
+    bench = px[b]
+    stocks = [c for c in px.columns if c not in (b, sf)]
     trend, mkt_adj, score = _score_panels(px[stocks], bench)
     dt = px.index[-1]
     sc = score.loc[dt].dropna().sort_values(ascending=False)
@@ -127,11 +151,14 @@ def rank_universe(symbols: list[str]) -> list[dict]:
     return out
 
 
-def backtest(symbols: list[str], start: str, end: str, cost_bps: float = 10.0) -> dict:
-    """Weekly residual-momentum backtest over the given universe vs SPY."""
-    px = get_prices(symbols)
-    bench, safe = px[BENCH], px[SAFE]
-    stocks = [c for c in px.columns if c not in (BENCH, SAFE)]
+def backtest(symbols: list[str], start: str, end: str, cost_bps: float = 10.0,
+             market: str = "us") -> dict:
+    """Weekly residual-momentum backtest over the given universe vs its benchmark."""
+    cfg = MARKETS.get(market, MARKETS["us"])
+    bsym, sfsym = cfg["bench"], cfg["safe"]
+    px = get_prices(symbols, bsym, sfsym)
+    bench, safe = px[bsym], px[sfsym]
+    stocks = [c for c in px.columns if c not in (bsym, sfsym)]
     _, _, score = _score_panels(px[stocks], bench)        # standardised residual
 
     a, b = pd.Timestamp(start), pd.Timestamp(end)

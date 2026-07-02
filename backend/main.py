@@ -148,21 +148,25 @@ async def screen(symbols: str | None = None) -> ScreenResult:
     return await screen_universe(ibkr, stockanalysis, universe)
 
 
+def _momentum_universe_for(market: str, symbols: str | None) -> list[str]:
+    if symbols:
+        return [s.strip() for s in symbols.split(",") if s.strip()]
+    cfg = momentum_engine.MARKETS.get(market, momentum_engine.MARKETS["us"])
+    return cfg["universe"]
+
+
 @app.get("/api/momentum/universe")
-async def momentum_universe() -> dict:
-    """Default editable universe for the momentum desk."""
-    return {"universe": momentum_engine.DEFAULT_UNIVERSE}
+async def momentum_universe(market: str = "us") -> dict:
+    """Default editable universe for the momentum desk (per market)."""
+    return {"market": market, "universe": _momentum_universe_for(market, None)}
 
 
 @app.get("/api/momentum/rank")
-async def momentum_rank(symbols: str | None = None) -> dict:
+async def momentum_rank(symbols: str | None = None, market: str = "us") -> dict:
     """Current residual (market-adjusted) momentum ranking for the universe."""
-    universe = (
-        [s.strip() for s in symbols.split(",") if s.strip()]
-        if symbols else momentum_engine.DEFAULT_UNIVERSE
-    )
-    return {"generated_at": datetime.utcnow().isoformat(),
-            "ranking": momentum_engine.rank_universe(universe)}
+    universe = _momentum_universe_for(market, symbols)
+    return {"generated_at": datetime.utcnow().isoformat(), "market": market,
+            "ranking": momentum_engine.rank_universe(universe, market=market)}
 
 
 @app.get("/api/momentum/backtest")
@@ -170,13 +174,11 @@ async def momentum_backtest(
     symbols: str | None = None,
     start: str = "2020-01-01",
     end: str = "2026-06-27",
+    market: str = "us",
 ) -> dict:
-    """Backtest the residual-momentum strategy over an (editable) universe vs SPY."""
-    universe = (
-        [s.strip() for s in symbols.split(",") if s.strip()]
-        if symbols else momentum_engine.DEFAULT_UNIVERSE
-    )
-    return momentum_engine.backtest(universe, start, end)
+    """Backtest the residual-momentum strategy over an (editable) universe vs its benchmark."""
+    universe = _momentum_universe_for(market, symbols)
+    return momentum_engine.backtest(universe, start, end, market=market)
 
 
 @app.get("/api/technicals/{symbol}", response_model=Technicals)

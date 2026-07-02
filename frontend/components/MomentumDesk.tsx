@@ -21,7 +21,15 @@ function Stat({ label, value, good }: { label: string; value: string; good?: boo
   );
 }
 
-export function MomentumDesk() {
+export function MomentumDesk({
+  market = 'us',
+  title = 'Momentum desk',
+  benchLabel = 'SPY',
+}: {
+  market?: string;
+  title?: string;
+  benchLabel?: string;
+} = {}) {
   const [universeText, setUniverseText] = useState('');
   const [start, setStart] = useState('2020-01-01');
   const [end, setEnd] = useState('2026-06-27');
@@ -32,8 +40,8 @@ export function MomentumDesk() {
 
   // Seed the editable universe from the backend default once.
   useEffect(() => {
-    api.momentumUniverse().then((d) => setUniverseText(d.universe.join(', '))).catch(() => {});
-  }, []);
+    api.momentumUniverse(market).then((d) => setUniverseText(d.universe.join(', '))).catch(() => {});
+  }, [market]);
 
   const run = useCallback(
     async (mode: 'rank' | 'bt') => {
@@ -46,9 +54,9 @@ export function MomentumDesk() {
       setError(null);
       try {
         if (mode === 'rank') {
-          setRanking((await api.momentumRank(tickers)).ranking);
+          setRanking((await api.momentumRank(tickers, market)).ranking);
         } else {
-          const res = await api.momentumBacktest(tickers, start, end);
+          const res = await api.momentumBacktest(tickers, start, end, market);
           if (res.error) setError(res.error);
           else setBt(res);
         }
@@ -58,20 +66,20 @@ export function MomentumDesk() {
         setLoading(null);
       }
     },
-    [universeText, start, end],
+    [universeText, start, end, market],
   );
 
   return (
     <div className="rounded-lg border border-border bg-surface p-5">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-medium">Momentum desk</h2>
+          <h2 className="text-lg font-medium">{title}</h2>
           <p className="text-xs text-text-secondary">
             Residual (market-adjusted) momentum · edit the universe and recalculate
           </p>
         </div>
         <span className="text-[10px] uppercase tracking-wide text-text-secondary">
-          top 10 · top-20 buffer · SPY-200 safety
+          top 10 · top-20 buffer · {benchLabel}-200 safety
         </span>
       </div>
 
@@ -98,7 +106,7 @@ export function MomentumDesk() {
         </button>
         <button onClick={() => run('bt')} disabled={loading !== null}
           className="rounded border border-border bg-bg px-3 py-1.5 text-sm hover:border-text-secondary disabled:opacity-50">
-          {loading === 'bt' ? 'Backtesting…' : 'Backtest vs SPY'}
+          {loading === 'bt' ? 'Backtesting…' : `Backtest vs ${benchLabel}`}
         </button>
       </div>
 
@@ -150,8 +158,8 @@ export function MomentumDesk() {
             <Stat label="Total" value={`${bt.total_return.toFixed(1)}%`} good={bt.total_return > bt.spy_total} />
             <Stat label="CAGR" value={`${bt.cagr.toFixed(1)}%`} />
             <Stat label="Max DD" value={`${bt.max_drawdown.toFixed(1)}%`} />
-            <Stat label="SPY" value={`${bt.spy_total.toFixed(1)}%`} />
-            <Stat label="vs SPY" value={`${bt.excess_vs_spy >= 0 ? '+' : ''}${bt.excess_vs_spy.toFixed(1)}%`}
+            <Stat label={benchLabel} value={`${bt.spy_total.toFixed(1)}%`} />
+            <Stat label={`vs ${benchLabel}`} value={`${bt.excess_vs_spy >= 0 ? '+' : ''}${bt.excess_vs_spy.toFixed(1)}%`}
               good={bt.excess_vs_spy > 0} />
           </div>
 
@@ -167,7 +175,7 @@ export function MomentumDesk() {
                   formatter={(v: number) => `${v.toFixed(1)}%`} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Line type="monotone" dataKey="strategy" stroke="#22c55e" dot={false} strokeWidth={2} name="Strategy" />
-                <Line type="monotone" dataKey="spy" stroke="#60a5fa" dot={false} strokeWidth={1.5} name="SPY" />
+                <Line type="monotone" dataKey="spy" stroke="#60a5fa" dot={false} strokeWidth={1.5} name={benchLabel} />
               </LineChart>
             </ResponsiveContainer>
           </div>

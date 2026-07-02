@@ -153,7 +153,9 @@ export type MomentumBacktest = {
   error?: string;
 };
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// Same-origin by default: next.config.js rewrites /api/* to the backend, which
+// works from any device (desktop or phone on the LAN) without CORS.
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
@@ -172,13 +174,14 @@ export const api = {
     get<TradeIdea>(`/api/trade-idea/${symbol}${expiry ? `?expiry=${expiry}` : ''}`),
   screen: (symbols?: string[]) =>
     get<ScreenResult>(`/api/screen${symbols?.length ? `?symbols=${symbols.join(',')}` : ''}`),
-  momentumUniverse: () => get<{ universe: string[] }>('/api/momentum/universe'),
-  momentumRank: (symbols: string[]) =>
+  momentumUniverse: (market = 'us') =>
+    get<{ universe: string[] }>(`/api/momentum/universe?market=${market}`),
+  momentumRank: (symbols: string[], market = 'us') =>
     get<{ generated_at: string; ranking: MomentumName[] }>(
-      `/api/momentum/rank?symbols=${symbols.join(',')}`),
-  momentumBacktest: (symbols: string[], start: string, end: string) =>
+      `/api/momentum/rank?symbols=${encodeURIComponent(symbols.join(','))}&market=${market}`),
+  momentumBacktest: (symbols: string[], start: string, end: string, market = 'us') =>
     get<MomentumBacktest>(
-      `/api/momentum/backtest?symbols=${symbols.join(',')}&start=${start}&end=${end}`),
+      `/api/momentum/backtest?symbols=${encodeURIComponent(symbols.join(','))}&start=${start}&end=${end}&market=${market}`),
   fundamentals: (symbol: string) =>
     get<Record<string, unknown>>(`/api/fundamentals/${symbol}`),
 };

@@ -24,7 +24,11 @@ export default function DashboardPage() {
       </header>
 
       <div className="mb-6">
-        <MomentumDesk />
+        <MomentumDesk title="Momentum desk — US (S&P 100+)" />
+      </div>
+
+      <div className="mb-6">
+        <MomentumDesk market="india" title="Momentum desk — India (NIFTY 50)" benchLabel="NIFTY" />
       </div>
 
       <div className="mb-6">
