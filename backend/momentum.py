@@ -59,6 +59,31 @@ DEFAULT_UNIVERSE = sorted(set([
 
 MARKETS["us"]["universe"] = DEFAULT_UNIVERSE
 
+# Sector map for risk caps. "tech_hw" is the semis/AI-hardware sleeve used by
+# the SMH circuit breaker. Names not listed fall into "other" (never capped).
+SECTOR: dict[str, str] = {}
+for _sec, _names in {
+    "tech_hw": ["AMD","AMAT","ADI","AVGO","CDNS","GLW","INTC","KLAC","LRCX","MCHP","MRVL","MU",
+                "NVDA","NXPI","ON","QCOM","SNPS","STX","TXN","WDC","ANET","HPQ"],
+    "tech_soft": ["AAPL","MSFT","GOOGL","META","ADBE","CRM","INTU","NFLX","ORCL","PANW","FTNT",
+                  "IBM","ACN","PYPL"],
+    "financials": ["AXP","BAC","BK","BLK","C","COF","GS","JPM","MA","MET","MS","PNC","SCHW",
+                   "USB","V","WFC","AIG"],
+    "energy": ["COP","CVX","EOG","MPC","OXY","PSX","SLB","VLO","XOM"],
+    "healthcare": ["ABBV","ABT","AMGN","BMY","CI","CVS","DHR","ELV","GILD","HUM","ISRG","JNJ",
+                   "LLY","MDT","MRK","PFE","REGN","TMO","UNH","VRTX"],
+    "consumer": ["AMZN","BKNG","CMG","COST","HD","KO","LOW","MCD","MDLZ","MO","NKE","ORLY","PEP",
+                 "PG","PM","ROST","SBUX","TGT","TJX","WMT","F","GM","CL","DIS"],
+    "industrials": ["BA","CAT","CSX","DE","EMR","ETN","FDX","GD","GE","HON","ITW","LMT","MMM",
+                    "NSC","RTX","UNP","UPS"],
+    "util_telecom": ["AMT","DUK","NEE","SO","T","TMUS","VZ","CMCSA","CHTR"],
+    "materials": ["DOW","LIN"],
+}.items():
+    for _n in _names:
+        SECTOR[_n] = _sec
+
+SEMI_ETF = "SMH"   # sector circuit-breaker reference for the tech_hw sleeve
+
 # Per-symbol price cache: symbol -> (fetched_on, Series of adjusted close).
 _CACHE: dict[str, tuple[date, pd.Series]] = {}
 _LOOKBACK_YEARS = 9
@@ -152,13 +177,22 @@ def rank_universe(symbols: list[str], market: str = "us") -> list[dict]:
 
 
 def backtest(symbols: list[str], start: str, end: str, cost_bps: float = 10.0,
-             market: str = "us") -> dict:
-    """Weekly residual-momentum backtest over the given universe vs its benchmark."""
+             market: str = "us", sector_cap: int = 0, semi_breaker: bool = False) -> dict:
+    """Weekly residual-momentum backtest over the given universe vs its benchmark.
+
+    Risk controls (opt-in):
+      sector_cap   — max holdings per known sector (0 = off; "other" never capped).
+      semi_breaker — when SMH < its 200-day SMA, halve the tech_hw sleeve's
+                     weight (freed weight sits in cash for the week).
+    """
     cfg = MARKETS.get(market, MARKETS["us"])
     bsym, sfsym = cfg["bench"], cfg["safe"]
-    px = get_prices(symbols, bsym, sfsym)
+    extra = [SEMI_ETF] if semi_breaker else []
+    px = get_prices(symbols + extra, bsym, sfsym)
     bench, safe = px[bsym], px[sfsym]
-    stocks = [c for c in px.columns if c not in (bsym, sfsym)]
+    smh = px[SEMI_ETF] if semi_breaker and SEMI_ETF in px.columns else None
+    smh_sma = smh.rolling(200).mean() if smh is not None else None
+    stocks = [c for c in px.columns if c not in (bsym, sfsym, SEMI_ETF)]
     _, _, score = _score_panels(px[stocks], bench)        # standardised residual
 
     a, b = pd.Timestamp(start), pd.Timestamp(end)
@@ -178,19 +212,37 @@ def backtest(symbols: list[str], start: str, end: str, cost_bps: float = 10.0,
         nxt = rebal[i + 1] if i + 1 < len(rebal) else test[-1]
         rk = score.loc[dt].dropna().rank(ascending=False)
         order = rk.sort_values().index
-        keep = sorted([h for h in holdings if rk.get(h, 1e9) <= BUFFER], key=lambda x: rk[x])[:N_HOLD]
+
+        def _fits(cand: str, chosen: list[str]) -> bool:
+            if not sector_cap:
+                return True
+            sec = SECTOR.get(cand)
+            if sec is None:
+                return True                      # unknown sector: never capped
+            return sum(1 for c in chosen if SECTOR.get(c) == sec) < sector_cap
+
+        keep = []
+        for h in sorted([h for h in holdings if rk.get(h, 1e9) <= BUFFER], key=lambda x: rk[x]):
+            if len(keep) < N_HOLD and _fits(h, keep):
+                keep.append(h)
         new = list(keep)
         for s in order:
             if len(new) >= N_HOLD:
                 break
-            if s not in new:
+            if s not in new and _fits(s, new):
                 new.append(s)
         turnover = len(set(new) ^ set(holdings)) / 2 / N_HOLD if holdings else 1.0
         holdings = new
         if not holdings:
             continue
-        wk = (px.loc[nxt, holdings] / px.loc[dt, holdings] - 1).dropna()
-        basket = float(wk.clip(-0.6, 0.6).mean()) if len(wk) else 0.0
+        wk = (px.loc[nxt, holdings] / px.loc[dt, holdings] - 1).dropna().clip(-0.6, 0.6)
+        # Sector circuit breaker: SMH below its 200DMA -> tech_hw names run at
+        # half weight, freed weight sits in cash (earns 0) for the week.
+        if smh is not None and smh.asof(dt) < smh_sma.asof(dt):
+            w = pd.Series({h: (0.5 if SECTOR.get(h) == "tech_hw" else 1.0) for h in wk.index})
+            basket = float((wk * w).sum() / N_HOLD)
+        else:
+            basket = float(wk.mean()) if len(wk) else 0.0
         if bench.asof(dt) < spy_sma.asof(dt):
             basket = 0.5 * basket + 0.5 * float(safe.asof(nxt) / safe.asof(dt) - 1)
         basket -= turnover * cost_bps / 10000.0

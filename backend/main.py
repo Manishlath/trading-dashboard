@@ -175,10 +175,19 @@ async def momentum_backtest(
     start: str = "2020-01-01",
     end: str = "2026-06-27",
     market: str = "us",
+    sector_cap: int = 0,
+    semi_breaker: bool = False,
 ) -> dict:
-    """Backtest the residual-momentum strategy over an (editable) universe vs its benchmark."""
+    """Backtest the residual-momentum strategy over an (editable) universe vs its benchmark.
+
+    Risk controls: sector_cap (max names per sector, 0=off) and semi_breaker
+    (halve the semis sleeve while SMH is below its 200-day SMA).
+    """
     universe = _momentum_universe_for(market, symbols)
-    return momentum_engine.backtest(universe, start, end, market=market)
+    return momentum_engine.backtest(
+        universe, start, end, market=market,
+        sector_cap=sector_cap, semi_breaker=semi_breaker,
+    )
 
 
 @app.get("/api/technicals/{symbol}", response_model=Technicals)

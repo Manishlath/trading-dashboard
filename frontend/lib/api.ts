@@ -179,9 +179,10 @@ export const api = {
   momentumRank: (symbols: string[], market = 'us') =>
     get<{ generated_at: string; ranking: MomentumName[] }>(
       `/api/momentum/rank?symbols=${encodeURIComponent(symbols.join(','))}&market=${market}`),
-  momentumBacktest: (symbols: string[], start: string, end: string, market = 'us') =>
+  momentumBacktest: (symbols: string[], start: string, end: string, market = 'us', riskManaged = false) =>
     get<MomentumBacktest>(
-      `/api/momentum/backtest?symbols=${encodeURIComponent(symbols.join(','))}&start=${start}&end=${end}&market=${market}`),
+      `/api/momentum/backtest?symbols=${encodeURIComponent(symbols.join(','))}&start=${start}&end=${end}&market=${market}` +
+      (riskManaged ? '&sector_cap=3&semi_breaker=true' : '')),
   fundamentals: (symbol: string) =>
     get<Record<string, unknown>>(`/api/fundamentals/${symbol}`),
 };

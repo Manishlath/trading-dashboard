@@ -36,6 +36,7 @@ export function MomentumDesk({
   const [ranking, setRanking] = useState<MomentumName[]>([]);
   const [bt, setBt] = useState<MomentumBacktest | null>(null);
   const [loading, setLoading] = useState<'rank' | 'bt' | null>(null);
+  const [riskManaged, setRiskManaged] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Seed the editable universe from the backend default once.
@@ -56,7 +57,7 @@ export function MomentumDesk({
         if (mode === 'rank') {
           setRanking((await api.momentumRank(tickers, market)).ranking);
         } else {
-          const res = await api.momentumBacktest(tickers, start, end, market);
+          const res = await api.momentumBacktest(tickers, start, end, market, riskManaged);
           if (res.error) setError(res.error);
           else setBt(res);
         }
@@ -66,7 +67,7 @@ export function MomentumDesk({
         setLoading(null);
       }
     },
-    [universeText, start, end, market],
+    [universeText, start, end, market, riskManaged],
   );
 
   return (
@@ -108,6 +109,11 @@ export function MomentumDesk({
           className="rounded border border-border bg-bg px-3 py-1.5 text-sm hover:border-text-secondary disabled:opacity-50">
           {loading === 'bt' ? 'Backtesting…' : `Backtest vs ${benchLabel}`}
         </button>
+        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+          <input type="checkbox" checked={riskManaged}
+            onChange={(e) => setRiskManaged(e.target.checked)} className="accent-amber-500" />
+          Risk managed (sector cap 3 + SMH breaker)
+        </label>
       </div>
 
       {error && (
