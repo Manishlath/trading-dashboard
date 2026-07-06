@@ -159,7 +159,17 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
+  if (!res.ok) {
+    // Surface the backend's error detail (e.g. "IBKR Gateway unreachable")
+    // instead of a bare status code.
+    let detail = '';
+    try {
+      detail = (await res.json())?.detail ?? '';
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail || `API ${path} → ${res.status}`);
+  }
   return res.json();
 }
 

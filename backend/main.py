@@ -6,6 +6,7 @@ Run locally:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -76,6 +77,29 @@ app.add_middleware(
 )
 
 
+async def _ibkr_call(coro, timeout: float = 10.0):
+    """Fail fast with a clear 503 when IB Gateway is down.
+
+    Probes the connection first (a refused connect fails in well under a
+    second) instead of letting the request ride the client's full reconnect
+    backoff — which spins past the Next.js proxy's 30s limit and surfaces as
+    an opaque 500. Once connected, the real call runs with no artificial cap.
+    """
+    try:
+        if not ibkr._ib.isConnected():
+            await asyncio.wait_for(
+                ibkr._connect_with_backoff(max_attempts=1), timeout=timeout
+            )
+    except Exception:
+        coro.close()   # suppress "coroutine never awaited"
+        raise HTTPException(
+            503,
+            "IBKR Gateway unreachable (port 4002). Start IB Gateway / TWS and "
+            "enable the API, then retry.",
+        )
+    return await coro
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
@@ -89,14 +113,14 @@ async def health() -> dict:
 async def get_portfolio() -> list[Position]:
     if not ibkr:
         raise HTTPException(503, "IBKR client not initialised")
-    return await ibkr.get_positions()
+    return await _ibkr_call(ibkr.get_positions())
 
 
 @app.get("/api/account", response_model=AccountSummary)
 async def get_account() -> AccountSummary:
     if not ibkr:
         raise HTTPException(503, "IBKR client not initialised")
-    return await ibkr.get_account_summary()
+    return await _ibkr_call(ibkr.get_account_summary())
 
 
 # ---------------------------------------------------------------------------
@@ -107,14 +131,14 @@ async def get_account() -> AccountSummary:
 async def get_quote(symbol: str) -> dict:
     if not ibkr:
         raise HTTPException(503, "IBKR client not initialised")
-    return await ibkr.get_quote(symbol)
+    return await _ibkr_call(ibkr.get_quote(symbol))
 
 
 @app.get("/api/history/{symbol}", response_model=PriceHistory)
 async def get_history(symbol: str, timeframe: str = "1d", lookback_days: int = 365) -> PriceHistory:
     if not ibkr:
         raise HTTPException(503, "IBKR client not initialised")
-    return await ibkr.get_price_history(symbol, timeframe, lookback_days)
+    return await _ibkr_call(ibkr.get_price_history(symbol, timeframe, lookback_days), timeout=45)
 
 
 @app.get("/api/ivrank/{symbol}", response_model=IVRank)
@@ -122,14 +146,14 @@ async def get_iv_rank(symbol: str) -> IVRank:
     """52-week HV rank for a symbol. Used to highlight put-selling candidates."""
     if not ibkr:
         raise HTTPException(503, "IBKR client not initialised")
-    return await ibkr.get_iv_rank(symbol)
+    return await _ibkr_call(ibkr.get_iv_rank(symbol), timeout=45)
 
 
 @app.get("/api/chain/{symbol}", response_model=OptionChain)
 async def get_chain(symbol: str, expiry: str | None = None) -> OptionChain:
     if not ibkr:
         raise HTTPException(503, "IBKR client not initialised")
-    return await ibkr.get_option_chain(symbol, expiry)
+    return await _ibkr_call(ibkr.get_option_chain(symbol, expiry), timeout=45)
 
 
 @app.get("/api/screen", response_model=ScreenResult)
@@ -195,7 +219,7 @@ async def get_technicals(symbol: str) -> Technicals:
     """Technical indicators (SMA/RSI/MACD/Bollinger/ATR + trend) from price history."""
     if not ibkr:
         raise HTTPException(503, "IBKR client not initialised")
-    return await ibkr.get_technicals(symbol)
+    return await _ibkr_call(ibkr.get_technicals(symbol), timeout=45)
 
 
 @app.get("/api/trade-idea/{symbol}", response_model=TradeIdea)
@@ -217,7 +241,7 @@ async def get_trade_idea(symbol: str, expiry: str | None = None) -> TradeIdea:
         except Exception as exc:
             logging.getLogger(__name__).warning("fundamentals fetch failed symbol=%s err=%s", symbol, exc)
     try:
-        return await ibkr.get_trade_idea(symbol, expiry, fundamentals=fundamentals)
+        return await _ibkr_call(ibkr.get_trade_idea(symbol, expiry, fundamentals=fundamentals), timeout=90)
     except TradeIdeaError as exc:
         raise HTTPException(422, str(exc))
 
