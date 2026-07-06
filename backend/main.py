@@ -223,7 +223,7 @@ async def get_technicals(symbol: str) -> Technicals:
 
 
 @app.get("/api/trade-idea/{symbol}", response_model=TradeIdea)
-async def get_trade_idea(symbol: str, expiry: str | None = None) -> TradeIdea:
+async def get_trade_idea(symbol: str, expiry: str | None = None, risk: str = "conservative") -> TradeIdea:
     """Final trade-idea generation — a concrete, defined-risk option structure.
 
     Factors in valuation (StockAnalysis fundamentals) and chart context
@@ -241,7 +241,7 @@ async def get_trade_idea(symbol: str, expiry: str | None = None) -> TradeIdea:
         except Exception as exc:
             logging.getLogger(__name__).warning("fundamentals fetch failed symbol=%s err=%s", symbol, exc)
     try:
-        return await _ibkr_call(ibkr.get_trade_idea(symbol, expiry, fundamentals=fundamentals), timeout=90)
+        return await _ibkr_call(ibkr.get_trade_idea(symbol, expiry, fundamentals=fundamentals, risk=risk), timeout=90)
     except TradeIdeaError as exc:
         raise HTTPException(422, str(exc))
 

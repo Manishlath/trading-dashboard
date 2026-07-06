@@ -332,7 +332,8 @@ class IBKRClient:
         history = await self.get_price_history(symbol, timeframe="1d", lookback_days=lookback_days)
         return compute_technicals(history)
 
-    async def get_trade_idea(self, symbol: str, expiry: Optional[str] = None, fundamentals=None):
+    async def get_trade_idea(self, symbol: str, expiry: Optional[str] = None, fundamentals=None,
+                             risk: str = "conservative"):
         """Generate one concrete, profit-seeking option trade for ``symbol``.
 
         Orchestration only: pulls the live chain + IV rank + technicals (and
@@ -358,6 +359,7 @@ class IBKRClient:
             iv_rank=ivr.hv_rank_52w,
             fundamentals=fundamentals,
             technicals=technicals,
+            risk=risk,
         )
         return idea
 

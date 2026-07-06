@@ -102,6 +102,7 @@ function PnlChart({ idea }: { idea: TradeIdeaT }) {
 export function TradeIdea({ requestedSymbol }: { requestedSymbol?: string } = {}) {
   const [symbol, setSymbol] = useState('NVDA');
   const [idea, setIdea] = useState<TradeIdeaT | null>(null);
+  const [risk, setRisk] = useState('conservative');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,14 +112,14 @@ export function TradeIdea({ requestedSymbol }: { requestedSymbol?: string } = {}
     setLoading(true);
     setError(null);
     try {
-      setIdea(await api.tradeIdea(sym));
+      setIdea(await api.tradeIdea(sym, undefined, risk));
     } catch (e) {
       setIdea(null);
       setError(e instanceof Error ? e.message : 'Failed to generate trade idea');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [risk]);
 
   const generate = useCallback(() => generateFor(symbol), [generateFor, symbol]);
 
@@ -147,6 +148,15 @@ export function TradeIdea({ requestedSymbol }: { requestedSymbol?: string } = {}
           placeholder="Symbol"
           className="w-28 rounded border border-border bg-bg px-2 py-1.5 font-mono text-sm outline-none focus:border-text-secondary"
         />
+        <select
+          value={risk}
+          onChange={(e) => setRisk(e.target.value)}
+          className="rounded border border-border bg-bg px-2 py-1.5 text-sm outline-none focus:border-text-secondary"
+        >
+          <option value="conservative">Conservative · 30Δ</option>
+          <option value="moderate">Moderate · 38Δ</option>
+          <option value="aggressive">Aggressive · 45Δ ×2</option>
+        </select>
         <button
           onClick={generate}
           disabled={loading}

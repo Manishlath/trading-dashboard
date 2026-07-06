@@ -180,8 +180,8 @@ export const api = {
   chain: (symbol: string, expiry?: string) =>
     get<OptionChain>(`/api/chain/${symbol}${expiry ? `?expiry=${expiry}` : ''}`),
   ivRank: (symbol: string) => get<IVRank>(`/api/ivrank/${symbol}`),
-  tradeIdea: (symbol: string, expiry?: string) =>
-    get<TradeIdea>(`/api/trade-idea/${symbol}${expiry ? `?expiry=${expiry}` : ''}`),
+  tradeIdea: (symbol: string, expiry?: string, risk = 'conservative') =>
+    get<TradeIdea>(`/api/trade-idea/${symbol}?risk=${risk}${expiry ? `&expiry=${expiry}` : ''}`),
   screen: (symbols?: string[]) =>
     get<ScreenResult>(`/api/screen${symbols?.length ? `?symbols=${symbols.join(',')}` : ''}`),
   momentumUniverse: (market = 'us') =>

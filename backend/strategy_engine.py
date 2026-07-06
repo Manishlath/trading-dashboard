@@ -41,6 +41,16 @@ class TradeIdeaError(ValueError):
     """Raised when a symbol has insufficient data to build a trade."""
 
 
+# Risk profiles: how aggressive the credit spread is. Higher short delta means
+# more premium but lower probability of profit; a wider wing means more credit
+# and more max loss per spread.
+RISK_PROFILES: dict[str, dict] = {
+    "conservative": {"target_delta": 0.30, "wing_strikes": 1, "contracts": 1},
+    "moderate":     {"target_delta": 0.38, "wing_strikes": 2, "contracts": 1},
+    "aggressive":   {"target_delta": 0.45, "wing_strikes": 3, "contracts": 2},
+}
+
+
 # ---------------------------------------------------------------------------
 # Signal assessment — valuation + chart context
 # ---------------------------------------------------------------------------
@@ -185,11 +195,14 @@ def _build_credit_spread(
     sigma: float,
     contracts_list: list[OptionContract],
     contracts: int,
+    target_delta: float = TARGET_SHORT_DELTA,
+    wing_strikes: int = 1,
 ):
-    """Select short ~30Δ option + protective wing, price the spread, return metrics.
+    """Select the short option nearest ``target_delta`` + a protective wing
+    ``wing_strikes`` strikes further out, price the spread, return metrics.
 
-    For ``put`` the wing is one strike *below* the short (bull put); for ``call``
-    one strike *above* (bear call).
+    For ``put`` the wing sits *below* the short (bull put); for ``call`` *above*
+    (bear call). Wider wings collect more credit but risk more per spread.
     """
     bullish = side == "put"
     # OTM candidates: puts below spot / calls above spot, nearest-money first.
@@ -207,7 +220,7 @@ def _build_credit_spread(
     # (flagged later) when nothing tradeable is available.
     liquid = [c for c in otm if _is_liquid(c)]
     short_pool = liquid if liquid else otm
-    short = min(short_pool, key=lambda c: abs(abs(model_delta(c.strike)) - TARGET_SHORT_DELTA))
+    short = min(short_pool, key=lambda c: abs(abs(model_delta(c.strike)) - target_delta))
 
     if bullish:
         wing = [c for c in otm if c.strike < short.strike]
@@ -215,13 +228,12 @@ def _build_credit_spread(
         wing = [c for c in otm if c.strike > short.strike]
     if not wing:
         raise TradeIdeaError(f"no protective {side} wing beyond short for {symbol}")
-    # Closest wing to the short, preferring a liquid one to cap leakage on both legs.
+    # Wing selection: walk ``wing_strikes`` strikes beyond the short, preferring
+    # liquid strikes to cap leakage on both legs.
     liquid_wing = [c for c in wing if _is_liquid(c)]
     wing_pool = liquid_wing if liquid_wing else wing
-    long_opt = (
-        max(wing_pool, key=lambda c: c.strike) if bullish
-        else min(wing_pool, key=lambda c: c.strike)
-    )
+    wing_pool = sorted(wing_pool, key=lambda c: -c.strike if bullish else c.strike)
+    long_opt = wing_pool[min(wing_strikes, len(wing_pool)) - 1]
 
     short_delta = model_delta(short.strike)
     long_delta = model_delta(long_opt.strike)
@@ -277,7 +289,8 @@ def generate_trade_idea(
     iv_rank: float,
     fundamentals: Optional[Fundamentals] = None,
     technicals: Optional[Technicals] = None,
-    contracts: int = DEFAULT_SPREADS,
+    contracts: Optional[int] = None,
+    risk: str = "conservative",
 ) -> TradeIdea:
     """Build a directional, defined-risk credit spread for ``symbol``.
 
@@ -290,6 +303,12 @@ def generate_trade_idea(
     T = max(days_to_expiry / 365.0, 1e-4)
     sigma = hv30 if hv30 and hv30 > 0 else 0.30
 
+    profile = RISK_PROFILES.get(risk, RISK_PROFILES["conservative"])
+    target_delta = profile["target_delta"]
+    wing_strikes = profile["wing_strikes"]
+    if contracts is None:
+        contracts = profile["contracts"]
+
     bias, signals, _score = _assess(spot, fundamentals, technicals)
 
     # Bearish → bear call spread (needs call strikes). Otherwise bull put spread.
@@ -297,12 +316,14 @@ def generate_trade_idea(
         spread = _build_credit_spread(
             side="call", symbol=symbol, spot=spot, T=T, sigma=sigma,
             contracts_list=call_contracts, contracts=contracts,
+            target_delta=target_delta, wing_strikes=wing_strikes,
         )
         strategy_name, direction = "Bear call credit spread", "neutral-bearish"
     else:
         spread = _build_credit_spread(
             side="put", symbol=symbol, spot=spot, T=T, sigma=sigma,
             contracts_list=put_contracts, contracts=contracts,
+            target_delta=target_delta, wing_strikes=wing_strikes,
         )
         strategy_name, direction = "Bull put credit spread", "neutral-bullish"
 
@@ -311,8 +332,10 @@ def generate_trade_idea(
     credit, width = spread["credit"], spread["width"]
     short_delta = spread["short_delta"]
 
-    net_credit = round(credit * 100, 2)
-    max_loss = round((width - credit) * 100, 2)
+    # Position-level dollars (per-spread x contracts) so the headline matches
+    # what the whole suggested position collects and risks.
+    net_credit = round(credit * 100 * contracts, 2)
+    max_loss = round((width - credit) * 100 * contracts, 2)
     max_profit = net_credit
     prob_of_profit = round((1 - abs(short_delta)) * 100, 1)
     return_on_risk = round(max_profit / max_loss, 3) if max_loss > 0 else 0.0
@@ -324,7 +347,7 @@ def generate_trade_idea(
         Leg(qty=-contracts, opt=side, strike=short.strike, expiry_T=T, iv=sigma),
         Leg(qty=contracts, opt=side, strike=long_opt.strike, expiry_T=T, iv=sigma),
     ]
-    total_net_debit = -net_credit * contracts        # received credit → negative debit
+    total_net_debit = -net_credit                    # received credit → negative debit (position-level)
     s_range = np.linspace(spot * 0.75, spot * 1.25, 120)
     pnl = strategy_pnl_at_expiry(legs, s_range, net_debit=total_net_debit)
     breakevens = breakeven_points(legs, net_debit=total_net_debit, S_range=s_range)
@@ -359,8 +382,9 @@ def generate_trade_idea(
             "Caution: liquidity is marginal — work a limit order near mid to avoid leakage."
         )
 
+    risk_note = f"Risk profile: {risk} (~{target_delta:.2f}Δ short, {wing_strikes}-strike wing, {contracts}x). "
     thesis = (
-        f"Signals read {bias}. {strategy_name}: sell the ${short.strike:g} {side} and buy the "
+        risk_note + f"Signals read {bias}. {strategy_name}: sell the ${short.strike:g} {side} and buy the "
         f"${long_opt.strike:g} {side} expiring {expiry} ({days_to_expiry}d). The short strike sits "
         f"{loc} at ~{abs(short_delta):.2f} delta, a ~{prob_of_profit:.0f}% probability of profit. "
         f"{iv_note} You collect ${net_credit:,.0f} per spread and risk ${max_loss:,.0f}, {hold_clause}. "
