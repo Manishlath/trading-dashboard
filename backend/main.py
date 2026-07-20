@@ -189,8 +189,11 @@ async def momentum_universe(market: str = "us") -> dict:
 async def momentum_rank(symbols: str | None = None, market: str = "us") -> dict:
     """Current residual (market-adjusted) momentum ranking for the universe."""
     universe = _momentum_universe_for(market, symbols)
-    return {"generated_at": datetime.utcnow().isoformat(), "market": market,
-            "ranking": momentum_engine.rank_universe(universe, market=market)}
+    try:
+        ranking = momentum_engine.rank_universe(universe, market=market)
+    except momentum_engine.MomentumDataError as exc:
+        raise HTTPException(503, str(exc))
+    return {"generated_at": datetime.utcnow().isoformat(), "market": market, "ranking": ranking}
 
 
 @app.get("/api/momentum/backtest")
@@ -208,10 +211,13 @@ async def momentum_backtest(
     (halve the semis sleeve while SMH is below its 200-day SMA).
     """
     universe = _momentum_universe_for(market, symbols)
-    return momentum_engine.backtest(
-        universe, start, end, market=market,
-        sector_cap=sector_cap, semi_breaker=semi_breaker,
-    )
+    try:
+        return momentum_engine.backtest(
+            universe, start, end, market=market,
+            sector_cap=sector_cap, semi_breaker=semi_breaker,
+        )
+    except momentum_engine.MomentumDataError as exc:
+        raise HTTPException(503, str(exc))
 
 
 @app.get("/api/technicals/{symbol}", response_model=Technicals)

@@ -89,23 +89,40 @@ _CACHE: dict[str, tuple[date, pd.Series]] = {}
 _LOOKBACK_YEARS = 9
 
 
-def _fetch_yahoo(symbol: str) -> pd.Series | None:
+class MomentumDataError(RuntimeError):
+    """Raised when required price data (a benchmark or too many names) is missing."""
+
+
+def _fetch_yahoo(symbol: str, attempts: int = 3) -> pd.Series | None:
+    """Fetch daily adjusted close from Yahoo, retrying transient failures.
+
+    Yahoo intermittently drops requests (rate limiting, brief 5xx, host
+    hiccups). Retrying with a short backoff — and failing over to the query2
+    host — turns most one-off failures into successes, which matters most for
+    the benchmark/safe symbols whose absence would break the whole ranking.
+    """
+    from urllib.parse import quote
     end = datetime.utcnow()
     start = end - timedelta(days=365 * _LOOKBACK_YEARS)
-    try:
-        from urllib.parse import quote
-        r = httpx.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(symbol, safe='')}",
-            params={"period1": int(start.timestamp()), "period2": int(end.timestamp()),
-                    "interval": "1d"}, headers=_H, timeout=25,
-        )
-        d = r.json()["chart"]["result"][0]
-        ts = pd.to_datetime(d["timestamp"], unit="s").normalize()
-        s = pd.Series(d["indicators"]["adjclose"][0]["adjclose"], index=ts, name=symbol).dropna()
-        return s[~s.index.duplicated()]
-    except Exception as exc:
-        logger.warning("momentum fetch failed symbol=%s err=%r", symbol, repr(exc)[:80])
-        return None
+    enc = quote(symbol, safe="")
+    for attempt in range(1, attempts + 1):
+        host = "query1" if attempt % 2 else "query2"
+        try:
+            r = httpx.get(
+                f"https://{host}.finance.yahoo.com/v8/finance/chart/{enc}",
+                params={"period1": int(start.timestamp()), "period2": int(end.timestamp()),
+                        "interval": "1d"}, headers=_H, timeout=25,
+            )
+            d = r.json()["chart"]["result"][0]
+            ts = pd.to_datetime(d["timestamp"], unit="s").normalize()
+            s = pd.Series(d["indicators"]["adjclose"][0]["adjclose"], index=ts, name=symbol).dropna()
+            return s[~s.index.duplicated()]
+        except Exception as exc:
+            if attempt == attempts:
+                logger.warning("momentum fetch failed symbol=%s err=%r", symbol, repr(exc)[:80])
+            else:
+                time.sleep(0.4 * attempt)
+    return None
 
 
 def get_prices(symbols: list[str], bench: str = BENCH, safe: str = SAFE) -> pd.DataFrame:
@@ -123,6 +140,23 @@ def get_prices(symbols: list[str], bench: str = BENCH, safe: str = SAFE) -> pd.D
             _CACHE[s] = (today, v)
             series[s] = v
         time.sleep(0.05)
+
+    # The benchmark and safe asset are load-bearing — without them the score /
+    # backtest can't be computed. Fail with a clear, actionable message instead
+    # of a KeyError → opaque 500 downstream.
+    missing = [s for s in (bench, safe) if s not in series]
+    if missing:
+        raise MomentumDataError(
+            f"could not fetch required data for {', '.join(missing)} from Yahoo "
+            "(transient rate-limit or outage) — please retry in a moment."
+        )
+    stock_cols = [c for c in series if c not in (bench, safe)]
+    if len(stock_cols) < 12:
+        raise MomentumDataError(
+            f"only {len(stock_cols)} of the requested symbols returned data — "
+            "too few to rank; retry in a moment or check the tickers."
+        )
+
     px = pd.DataFrame(series).sort_index().ffill()
     # Clip daily log-returns at ±30% to remove split/spinoff artifacts.
     px = np.exp(np.log(px).diff().clip(-0.30, 0.30).cumsum())
